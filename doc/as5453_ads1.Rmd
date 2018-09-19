@@ -1,0 +1,31 @@
+---
+title: "What makes women (from around the world) happy?"
+output: html_notebook
+---
+
+# Loading the Libraries
+
+```{r load libraries, warning=FALSE, message=FALSE}
+
+library(tidyverse)
+library(tidytext)
+library(DT)
+library(scales)
+library(wordcloud2)
+library(gridExtra)
+library(ngram)
+library(shiny)
+library(topicmodels)
+library(tm)
+
+```
+
+```{r}
+
+hdb <- read_csv("processed_moments.csv")
+urlfile<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/demographic.csv'
+dem <- read_csv(urlfile)
+
+final <- inner_join(hdb,dem)
+
+```
