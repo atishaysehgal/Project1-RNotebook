@@ -5,16 +5,8 @@
 ![image](figs/title.jpeg)
 
 ### [Project Description](doc/)
-This is the first and only *individual* (as opposed to *team*) this semester. 
 
-Term: Fall 2018
-
-+ Projec title: Lorem ipsum dolor sit amet
-+ This project is conducted by [your name]
-
-+ Project summary: [a short summary] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-
-Following [suggestions](http://nicercode.github.io/blog/2013-04-05-projects/) by [RICH FITZJOHN](http://nicercode.github.io/about/#Team) (@richfitz). This folder is orgarnized as follows.
+What makes you happy? A question which, in my opinion, yields different answers at different stages of life. If I was a **kid**(1-12 years old), I would probably have an innocent, goofy answer. If I was a **teenager**(13-19 years old), I'd probably have some rebel-without-a-cause answer. If I was a **middle aged** (36-59 years old) person, I'd probably have a family which I would talk about. If I was an **Old Timer**(60+ years old), I'd probably just want to talk about my family, friends, and also talk about my life that went by. But hey, I might be completely wrong! There's nothing to backup my intuition. Let's find out what makes people happy at different stages of life. To make it personal and hopefully relatable, let's find out what makes people happy in **different parts of the world** at different stages of life.
 
 ```
 proj/
