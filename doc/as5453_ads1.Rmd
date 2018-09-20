@@ -1,12 +1,26 @@
 ---
-title: "What makes women (from around the world) happy?"
-output: html_notebook
+title: "In this life(stage), what makes you happy?"
+output:
+  prettydoc::html_pretty:
+    theme: lumen
+    highlight: github
 ---
 
-# Loading the Libraries
+```{r load libraries, warning=FALSE, message=FALSE, echo=FALSE}
 
-```{r load libraries, warning=FALSE, message=FALSE}
+packages.used=c("tidyverse", "tidytext", "DT", 
+                "sentimentr", "wordcloud2", "scales",
+                "tm", "gridExtra", "ngram", 
+                "shiny", "topicmodels", "prettydoc")
 
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE)
+}
 library(tidyverse)
 library(tidytext)
 library(DT)
@@ -17,15 +31,150 @@ library(ngram)
 library(shiny)
 library(topicmodels)
 library(tm)
+library(prettydoc)
+library(sentimentr)
 
 ```
 
-```{r}
 
-hdb <- read_csv("processed_moments.csv")
+What makes you happy? A question which, in my opinion, yields different answers at different stages of life. If I was a **kid**(1-12 years old), I would probably have an innocent, goofy answer. If I was a **teenager**(13-19 years old), I'd probably have some rebel-without-a-cause answer. If I was a **middle aged** (36-59 years old) person, I'd probably have a family which I would talk about. If I was an **Old Timer**(60+ years old), I'd probably just want to talk about my family, friends, and also talk about my life that went by. But hey, I might be completely wrong! There's nothing to backup my intuition. Let's find out what makes people happy at different stages of life. To make it personal and hopefully relatable, let's find out what makes people happy in **different parts of the world** at different stages of life.
+
+
+```{r preprocessing, message=FALSE, warning=FALSE, echo=FALSE}
+# Processed Moments File
+hdb <- read_csv("../output/processed_moments.csv")
+
+# Demographics File
 urlfile<-'https://raw.githubusercontent.com/rit-public/HappyDB/master/happydb/data/demographic.csv'
 dem <- read_csv(urlfile)
 
+# Merged Dataset
 final <- inner_join(hdb,dem)
 
+# Removing weird ages
+final$age <- as.numeric(as.character(final$age))
+final <- final[final$age %in% 1:100,]
+
+# Adding the Life Stage Column
+
+final$lifeStage <- rep(NA)
+for(i in 1:nrow(final)){
+  if(final$age[i] %in% 1:12)
+    {
+    final$lifeStage[i] = "Kid"
+  } else if(final$age[i] %in% 13:19)
+    {
+    final$lifeStage[i] = "Teenager"
+  } else if(final$age[i] %in% 20:35)
+    {
+    final$lifeStage[i] = "Young"
+  } else if(final$age[i] %in% 36:59)
+    {
+    final$lifeStage[i] = "Middle Aged"
+  } else if(final$age[i] %in% 60:100)
+    {
+    final$lifeStage[i] = "Old Timer"
+  } else final$lifeStage[i] = "Outliers"
+}
+
+
+
 ```
+
+
+Having split the people by life stage, we can now analyze each life stage independently. First let us see which are the most commonly used words by each person belonging to each life stage. This is the aggregated count of words used in decreasing order per stage of life by different kinds of people.
+
+
+```{r most used words, message=FALSE, warning=FALSE, echo=FALSE}
+
+# Frequency of all words used by life stage
+happy_words <- final %>%
+  unnest_tokens(word, text) %>%
+  count(lifeStage, word, sort = TRUE) %>%
+  ungroup()
+
+# Selecting the top 7 words sorted descending according to word count
+happy_words %>%
+  arrange(desc(n)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(lifeStage) %>% 
+  top_n(7) %>% 
+  ungroup %>%
+  ggplot(aes(word, n, fill = lifeStage)) +
+  geom_col(show.legend = FALSE) +
+  ggtitle("Top 7 most used words in each lifestage")+
+  labs(x = "words", y = "count") +
+  facet_wrap(~lifeStage, ncol = 2, scales = "free") +
+  coord_flip()
+
+```
+
+
+If we look at the most used words in each lifestage, we notice that the word **"finally"** is being used a lot by everyone except kids. This seems like something which might be worth exploring, so we see check to see the most "important" words being used and the intersection of those words with the most used words.
+
+Looking at just the counts doesn't give us the full picture. Let us talk about importance.
+We use tf_idf to find the important words in our text. The idea of tf-idf is to find the important words for the content of each document by decreasing the weight for commonly used words and increasing the weight for words that are not used very much in a collection or corpus of documents.
+
+```{r tf_idf, message=FALSE, warning=FALSE, echo=FALSE}
+
+# Finding the tf_idf of each word in each life stage
+happy_words <- happy_words %>%
+  bind_tf_idf(word, lifeStage, n)
+
+# Selecting the top 7 words sorted descending according to tf_idf
+happy_words %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(lifeStage) %>% 
+  top_n(7) %>% 
+  ungroup %>%
+  ggplot(aes(word, tf_idf, fill = lifeStage)) +
+  geom_col(show.legend = FALSE) +
+  ggtitle("Top 7 important words being used in each lifestage")+
+  labs(x = "words", y = "tf-idf") +
+  facet_wrap(~lifeStage, ncol = 2, scales = "free") +
+  coord_flip()
+```
+
+
+From the above plot, we see that, the *kid* as expected has a completely weird list of important words (This is also because the number of kids is very low). The *middle aged* also expectedly talks about family. The *Old Timers* almost exclusively talk about family. Interestingly, the word **"finally"** comes up with the important words too. My intuition points to the fact that each of these groups are "finally" doing something which is making them happy.
+
+```{r bigrams, message=FALSE, warning=FALSE, echo=FALSE}
+
+happy_bigrams <- final %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2)
+
+bigrams_separated <- happy_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+bigram_tf_idf <- bigrams_united %>%
+  count(lifeStage, bigram) %>%
+  bind_tf_idf(bigram, lifeStage, n) %>%
+  arrange(desc(tf_idf))
+
+bigram_tf_idf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(bigram = factor(bigram, levels = rev(unique(bigram)))) %>% 
+  group_by(lifeStage) %>% 
+  top_n(4) %>% 
+  ungroup %>%
+  ggplot(aes(bigram, tf_idf, fill = lifeStage)) +
+  geom_col(show.legend = FALSE) +
+  ggtitle("Top 7 important bigrams being used in each lifestage")+
+  labs(x = "bigrams", y = "tf-idf") +
+  facet_wrap(~lifeStage, ncol = 2, scales = "free") +
+  coord_flip()
+
+```
+
