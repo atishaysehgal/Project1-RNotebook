@@ -11,7 +11,7 @@ output:
 packages.used=c("tidyverse", "tidytext", "DT", 
                 "sentimentr", "wordcloud2", "scales",
                 "tm", "gridExtra", "ngram", 
-                "shiny", "topicmodels", "prettydoc")
+                "shiny", "topicmodels", "prettydoc","broom")
 
 # check packages that need to be installed.
 packages.needed=setdiff(packages.used, 
@@ -33,6 +33,7 @@ library(topicmodels)
 library(tm)
 library(prettydoc)
 library(sentimentr)
+library(broom)
 
 ```
 
@@ -81,6 +82,8 @@ for(i in 1:nrow(final)){
 
 ```
 
+
+# Unigrams
 
 Having split the people by life stage, we can now analyze each life stage independently. First let us see which are the most commonly used words by each person belonging to each life stage. This is the aggregated count of words used in decreasing order per stage of life by different kinds of people.
 
@@ -139,35 +142,44 @@ happy_words %>%
 
 From the above plot, we see that, the *kid* as expected has a completely weird list of important words (This is also because the number of kids is very low). The *middle aged* also expectedly talks about family. The *Old Timers* almost exclusively talk about family. Interestingly, the word **"finally"** comes up with the important words too. My intuition points to the fact that each of these groups are "finally" doing something which is making them happy.
 
-```{r bigrams, message=FALSE, warning=FALSE, echo=FALSE}
+# Bigrams
 
+Now we want to see two words at a time as our natural language unit. This intuitively gives a better sense of what's being talking about providing just that extra bit of context for a lot of words we look at.
+
+```{r bigrams, message=FALSE, warning=FALSE, echo=FALSE}
+# Finding the bigrams
 happy_bigrams <- final %>%
   unnest_tokens(bigram, text, token = "ngrams", n = 2)
 
+# Separating the bigrams
 bigrams_separated <- happy_bigrams %>%
   separate(bigram, c("word1", "word2"), sep = " ")
 
+# Filtering the bigrams by removing stop-words
 bigrams_filtered <- bigrams_separated %>%
   filter(!word1 %in% stop_words$word) %>%
   filter(!word2 %in% stop_words$word)
 
-
+# Bigram counts
 bigram_counts <- bigrams_filtered %>% 
   count(word1, word2, sort = TRUE)
 
+# Re-uniting separated Bigrams
 bigrams_united <- bigrams_filtered %>%
   unite(bigram, word1, word2, sep = " ")
 
+# Finding the tf_idf for each bigram
 bigram_tf_idf <- bigrams_united %>%
   count(lifeStage, bigram) %>%
   bind_tf_idf(bigram, lifeStage, n) %>%
   arrange(desc(tf_idf))
 
+# Plotting the most important bigrams by tf_idf
 bigram_tf_idf %>%
   arrange(desc(tf_idf)) %>%
   mutate(bigram = factor(bigram, levels = rev(unique(bigram)))) %>% 
   group_by(lifeStage) %>% 
-  top_n(4) %>% 
+  top_n(7) %>% 
   ungroup %>%
   ggplot(aes(bigram, tf_idf, fill = lifeStage)) +
   geom_col(show.legend = FALSE) +
@@ -177,4 +189,507 @@ bigram_tf_idf %>%
   coord_flip()
 
 ```
+
+Looking at the bigrams, we see that **middle aged** people talk about their familial life. **Old timers** talk about speaking to their children or going out with friends. **Young people** talk about work and stimulating discussions. **Kids** are unpredictable. **Teenagers** talk about partying, video games and exams.
+
+# Countrywise
+
+We know generally what people feel happy about during different stages of life. However I would like to explore if living in different parts of the world adds any new localized reasons to make one happy. Our data is a little imbalanced with most of the data being from the United States but I still feel, we can get a different flavor of happiness for a few different regions. We use topic modeling to find the rich topics that our demographic talks about. 
+
+We first split the data into the following regions: USA, India, Scandinavia, Asia, Europe, Latin America
+
+```{r splitting into different countries, message=FALSE,warning=FALSE,echo=FALSE}
+
+USA <- split(final, final$country)$USA
+IND <- split(final, final$country)$IND
+Scandinavia <- final[final$country %in% c("NOR","DNK","SWE","FIN","ISL"),]
+Asia <- final[final$country %in% c("PHL","VNM","THA","BGD","IDN","SGP","JPN","KOR","NPL","PAK","AFG",
+                                   "TWN","AUS","NZL"),]
+Europe <- final[final$country %in% c("FRA","DEU","GBR","SRB","TUR","ALB","ROU","GRC","LTU","ARE","ITA",
+                                     "IRL","RUS"),]
+Latin <- final[final$country %in% c("ARG","BRA","VEN","URY","PRT","MEX","COL","PER","ECU","SUR",
+                                    "CHL","DOM"),]
+
+
+```
+
+
+# USA
+
+```{r USA happiness, warning=FALSE,message=FALSE,echo=FALSE, fig.width=5,fig.height=4}
+
+# Converting the dataset into a Document Term Matrix
+happy_bigrams <- USA %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  count(lifeStage, bigram, sort = TRUE) %>%
+  ungroup()
+
+# Separating the bigrams
+bigrams_separated <- happy_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# Filtering the bigrams by removing stop-words
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!word1 %in% NA) %>%
+  filter(!word2 %in% NA)
+
+# Bigram counts
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+# Re-uniting separated Bigrams
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+happy_dtm <- bigrams_united %>% 
+  cast_dtm(lifeStage,bigram,n)
+
+# Applying LDA to the document term matrix
+happy_lda <- LDA(happy_dtm, k = 7, control = list(seed=123))
+
+# Word-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "beta")
+
+happy_top_bigrams <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+happy_top_bigrams %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+Americans talk about Video games, Spending time with family/friends, Mothers Day, Birthdays, going to the groceries and watching movies. Let us see which life stage talks about which of these things the most.
+
+```{r USA happiness, warning=FALSE,message=FALSE,echo=FALSE, fig.width=5,fig.height=4}
+# Document-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "gamma")
+
+happy_top_documents <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, gamma) %>%
+  ungroup() %>%
+  arrange(topic, -gamma)
+
+happy_top_documents %>%
+  mutate(document = reorder(document, gamma)) %>%
+  ggplot(aes(document, gamma, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+```
+
+American Kids and teenagers only talk about video games or eating ice cream. Leisure activities make American kids and teens happy!
+Young Americans talk about topics which correspond to watching movies, playing video games and eating ice cream and spending time with family and friends.
+Middle aged Americans see a happiness shift from video games to spending time with family and completing chores like getting groceries etc for the house.
+Old Timer Americans are happy when their kids call them or when it's their birthday.
+
+
+# India
+
+```{r IND happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+
+# Converting the dataset into a Document Term Matrix
+happy_bigrams <- IND %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  count(lifeStage, bigram, sort = TRUE) %>%
+  ungroup()
+
+# Separating the bigrams
+bigrams_separated <- happy_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# Filtering the bigrams by removing stop-words
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!word1 %in% NA) %>%
+  filter(!word2 %in% NA)
+
+# Bigram counts
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+# Re-uniting separated Bigrams
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+happy_dtm <- bigrams_united %>% 
+  cast_dtm(lifeStage,bigram,n)
+
+# Applying LDA to the document term matrix
+happy_lda <- LDA(happy_dtm, k = 7, control = list(seed=123))
+
+# Word-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "beta")
+
+happy_top_bigrams <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+happy_top_bigrams %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+Indians talk about Enjoying moments in life, Spending time with family/friends, Hill Stations, Board Exams (The biggest exam in India in grade 12), going to the temple and weddings. Let us see which life stage talks about which of these things the most.
+
+```{r IND happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+# Document-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "gamma")
+
+happy_top_documents <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, gamma) %>%
+  ungroup() %>%
+  arrange(topic, -gamma)
+
+happy_top_documents %>%
+  mutate(document = reorder(document, gamma)) %>%
+  ggplot(aes(document, gamma, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+```
+
+Indian Kids and teenagers only talk about going to the temple,studying with friends and spending time with parents. Indian Kids find happiness in studies (haha).
+Young Indians talk about topics which correspond to enjoying moments in life, spending time with family and friends and going to marriages.
+Middle aged Indians are happy when their kids do well in the Board Exams or when they all go to a hill station for a vacation.
+Old Timer Indians are happy when their grandkids call them or when they watch the daily news or buy a car.
+
+# Rest of Asia
+
+```{r Asia happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+
+# Converting the dataset into a Document Term Matrix
+happy_bigrams <- Asia %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  count(lifeStage, bigram, sort = TRUE) %>%
+  ungroup()
+
+# Separating the bigrams
+bigrams_separated <- happy_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# Filtering the bigrams by removing stop-words
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!word1 %in% NA) %>%
+  filter(!word2 %in% NA)
+
+# Bigram counts
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+# Re-uniting separated Bigrams
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+happy_dtm <- bigrams_united %>% 
+  cast_dtm(lifeStage,bigram,n)
+
+# Applying LDA to the document term matrix
+happy_lda <- LDA(happy_dtm, k = 7, control = list(seed=123))
+
+# Word-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "beta")
+
+happy_top_bigrams <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+happy_top_bigrams %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+Asians talk about Enjoying moments in life, Spending time with enjoying life, playing sports, event occasions, and exam results! Let us see which life stage talks about which of these things the most.
+
+```{r Asia happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+# Document-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "gamma")
+
+happy_top_documents <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, gamma) %>%
+  ungroup() %>%
+  arrange(topic, -gamma)
+
+happy_top_documents %>%
+  mutate(document = reorder(document, gamma)) %>%
+  ggplot(aes(document, gamma, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+```
+
+Asian teenagers talk about enjoying life,playing poker with friends and exam results. Asian teens know how to enjoy life!
+Young Asians talk about topics which correspond to having events in life possibly weddings, spending time with family and friends, dating.
+Middle aged Asians are happy when they play sports, do shopping, spend time with their mother.
+There weren't any old timers spoken to.
+
+# Scandinavia
+
+```{r Scandinavia happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+
+# Converting the dataset into a Document Term Matrix
+happy_bigrams <- Scandinavia %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  count(lifeStage, bigram, sort = TRUE) %>%
+  ungroup()
+
+# Separating the bigrams
+bigrams_separated <- happy_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# Filtering the bigrams by removing stop-words
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!word1 %in% NA) %>%
+  filter(!word2 %in% NA)
+
+# Bigram counts
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+# Re-uniting separated Bigrams
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+happy_dtm <- bigrams_united %>% 
+  cast_dtm(lifeStage,bigram,n)
+
+# Applying LDA to the document term matrix
+happy_lda <- LDA(happy_dtm, k = 7, control = list(seed=123))
+
+# Word-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "beta")
+
+happy_top_bigrams <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+happy_top_bigrams %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+Scandinavians talk about reading books, nintendo switch, weddings, video games and promotions. Let us see which life stage talks about which of these things the most.
+
+```{r Scandinavia happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+# Document-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "gamma")
+
+happy_top_documents <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, gamma) %>%
+  ungroup() %>%
+  arrange(topic, -gamma)
+
+happy_top_documents %>%
+  mutate(document = reorder(document, gamma)) %>%
+  ggplot(aes(document, gamma, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+```
+
+Scandinavian teenagers mostly talk girlfriends, grandparents and college. Scandinavian teens keep in touch!
+Young Scandinavians (most of the scandinavians spoken to) are happy when they read a book, plan weddings, get promotions and play on their ninendo switch.
+Middle aged Scandinavians are happy when they prepare scrap books, look at chat and birthday screenshots and take photos.
+There weren't any old timers spoken to.
+
+# Rest of Europe
+
+```{r Europe happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+
+# Converting the dataset into a Document Term Matrix
+happy_bigrams <- Europe %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  count(lifeStage, bigram, sort = TRUE) %>%
+  ungroup()
+
+# Separating the bigrams
+bigrams_separated <- happy_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# Filtering the bigrams by removing stop-words
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!word1 %in% NA) %>%
+  filter(!word2 %in% NA)
+
+# Bigram counts
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+# Re-uniting separated Bigrams
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+happy_dtm <- bigrams_united %>% 
+  cast_dtm(lifeStage,bigram,n)
+
+# Applying LDA to the document term matrix
+happy_lda <- LDA(happy_dtm, k = 7, control = list(seed=123))
+
+# Word-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "beta")
+
+happy_top_bigrams <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+happy_top_bigrams %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+```
+
+Europeans talk about sports games/matches, weather, easter dinner, beer and wine and family. Let us see which life stage talks about which of these things the most.
+
+```{r Europe happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+
+# Document-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "gamma")
+
+happy_top_documents <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, gamma) %>%
+  ungroup() %>%
+  arrange(topic, -gamma)
+
+happy_top_documents %>%
+  mutate(document = reorder(document, gamma)) %>%
+  ggplot(aes(document, gamma, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+```
+
+European kids and teenagers mostly talk about sports, beer and winning. European kids drink and play things!
+Young Europeans are happy when their soccer team wins, meet for family dinner, watch games with their family or go on dates.
+Middle aged Europeans are happy when it is sunny, they read a book.
+Old Timer Europeans really like the sun, and walking dogs in the sun and meeting their family.
+
+# Latin America
+
+```{r Latin happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+
+# Converting the dataset into a Document Term Matrix
+happy_bigrams <- Latin %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+  count(lifeStage, bigram, sort = TRUE) %>%
+  ungroup()
+
+# Separating the bigrams
+bigrams_separated <- happy_bigrams %>%
+  separate(bigram, c("word1", "word2"), sep = " ")
+
+# Filtering the bigrams by removing stop-words
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>% 
+  filter(!word1 %in% NA) %>%
+  filter(!word2 %in% NA)
+
+# Bigram counts
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+# Re-uniting separated Bigrams
+bigrams_united <- bigrams_filtered %>%
+  unite(bigram, word1, word2, sep = " ")
+
+happy_dtm <- bigrams_united %>% 
+  cast_dtm(lifeStage,bigram,n)
+
+# Applying LDA to the document term matrix
+happy_lda <- LDA(happy_dtm, k = 7, control = list(seed=123))
+
+# Word-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "beta")
+
+happy_top_bigrams <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+happy_top_bigrams %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
+Latin Americans talk about soccer, church choir, girlfriends, watching movies and family. Let us see which life stage talks about which of these things the most.
+
+```{r Latin happiness, warning=FALSE,message=FALSE,echo=FALSE,fig.width=5,fig.height=4}
+# Document-topic probabilities
+happy_topics <- tidy(happy_lda, matrix = "gamma")
+
+happy_top_documents <- happy_topics %>%
+  group_by(topic) %>%
+  top_n(5, gamma) %>%
+  ungroup() %>%
+  arrange(topic, -gamma)
+
+happy_top_documents %>%
+  mutate(document = reorder(document, gamma)) %>%
+  ggplot(aes(document, gamma, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+
+```
+
+
+Latin American kids and teenagers mostly talk about playing the guitar, and exam grades. Latin American kids are rockstars!
+Young Latin Americans are happy when they watch a movie, play video games, ate their favorite food.
+Middle aged Latin Americans are happy when they meet their girlfriends or when their family unites!
+Old Timer Latin Americans really like eating at their favorite restaurant, watching movies.
+
+
+# Conclusion
+
+So many cultures, so many different reasons that make people happy. Who knew Scandinavians loved the nintendo switch? Or that Middle Aged Latin Americans are promiscuous and have girlfriends? European kids love drinking beer! Middle aged Indians go to hill stations? Asian teens play poker? 
+
+Everyone is different, everybody lives somewhat influenced by the localities they live in. Certain cultural differences cause different reasons of happiness and that is beautiful.
 
